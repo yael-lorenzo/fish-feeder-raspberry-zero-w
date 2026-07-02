@@ -15,9 +15,17 @@ step_sequence = [
     [0,0,1,0], [0,0,1,1], [0,0,0,1], [1,0,0,1]
 ]
 
-def spin_feeder_motor(rotations=3):
+# Traffic light for the camera: True means streaming, False means paused for a photo
+camera_streaming_allowed = True
+
+def spin_feeder_motor(rotations=1):
+    """
+    Spins the 28BYJ-48 stepper motor for a precise number of turns,
+    then cleanly cuts power to prevent overheating.
+    """
+    # 2048 steps = exactly 1 full 360-degree rotation
     print("Motor spinning started...")
-    steps_needed = int(512 * 8 * rotations)
+    steps_needed = int(2048 * rotations)
     for _ in range(steps_needed):
         for step in step_sequence:
             for pin, state in zip(motor_pins, step):
@@ -30,6 +38,7 @@ def spin_feeder_motor(rotations=3):
 
 # --- LIGHTWEIGHT SNAPSHOT STREAM ---
 def capture_single_frame():
+    camera_streaming_allowed = False
     """Uses the fast rpicam-still immediate mode to capture a lightweight JPEG byte array"""
     cmd = [
         "rpicam-still",
@@ -41,19 +50,27 @@ def capture_single_frame():
     ]
     try:
         result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=3)
+        camera_streaming_allowed = True
         return result.stdout
     except Exception as e:
         print(f"Camera capture error: {e}")
+        camera_streaming_allowed = True
         return None
 
 def generate_stream_frames():
+    global camera_streaming_allowed  # Tell Python to look at the global traffic light variable
     while True:
+        # If the feed button was pressed, pause and yield the camera
+        if not camera_streaming_allowed:
+            time.sleep(0.1)  # Sleep briefly and check again
+            continue
+            
         frame = capture_single_frame()
         if frame:
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+                   
         time.sleep(1.0) # Refresh rate: exactly 1 photo per second
-
 # --- ROUTES ---
 
 @app.route('/')
@@ -75,8 +92,10 @@ def video_feed():
 
 @app.route('/feed', methods=['POST'])
 def feed():
+    global camera_streaming_allowed
+    print("\n--- FEED ROUTE TRIGGERED ---")
     # 1. Spin motor
-    spin_feeder_motor(rotations=3)
+    spin_feeder_motor(rotations=1)
     time.sleep(1)
     
     # 2. Capture a high-res confirmation photo
