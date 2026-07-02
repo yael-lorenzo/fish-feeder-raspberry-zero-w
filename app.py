@@ -25,7 +25,7 @@ def spin_feeder_motor(rotations=1):
     """
     # 2048 steps = exactly 1 full 360-degree rotation
     print("Motor spinning started...")
-    steps_needed = int(2048 * rotations)
+    steps_needed = int(1024 * rotations)
     for _ in range(steps_needed):
         for step in step_sequence:
             for pin, state in zip(motor_pins, step):
@@ -38,13 +38,14 @@ def spin_feeder_motor(rotations=1):
 
 # --- LIGHTWEIGHT SNAPSHOT STREAM ---
 def capture_single_frame():
+    global camera_streaming_allowed
     camera_streaming_allowed = False
     """Uses the fast rpicam-still immediate mode to capture a lightweight JPEG byte array"""
     cmd = [
         "rpicam-still",
         "-t", "1",                  # Fast 1ms warmup timeout
-        "--width", "640",           # Lower resolution to save memory
-        "--height", "480",
+        "--width", "1920",           # Lower resolution to save memory
+        "--height", "1080",
         "-e", "jpg",                # Output raw JPEG format
         "-o", "-"                   # Pipe output directly to stdout (RAM)
     ]
