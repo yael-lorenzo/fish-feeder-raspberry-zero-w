@@ -20,20 +20,26 @@ camera_streaming_allowed = True
 
 def spin_feeder_motor(rotations=1):
     """
-    Spins the 28BYJ-48 stepper motor for a precise number of turns,
-    then cleanly cuts power to prevent overheating.
+    Spins the 28BYJ-48 stepper motor using the working nested loop structure,
+    calibrated precisely to hit 1.0 full turn.
     """
-    # 2048 steps = exactly 1 full 360-degree rotation
     print("Motor spinning started...")
-    steps_needed = int(1024 * rotations)
+    
+    # Calibrated base multiplier derived from your hardware's 1.5 turn output
+    # 683 loops * 8 steps per sequence = ~5,464 total steps (1 full physical turn)
+    steps_needed = int(684 * rotations)
+    
     for _ in range(steps_needed):
         for step in step_sequence:
             for pin, state in zip(motor_pins, step):
                 pin.value = state
+            # This 1ms delay inside your original sequence was perfect
             time.sleep(0.001)
-    
+
+    # Cleanly cut power to prevent overheating
     for pin in motor_pins:
         pin.off()
+        
     print("Motor spinning finished.")
 
 # --- LIGHTWEIGHT SNAPSHOT STREAM ---
