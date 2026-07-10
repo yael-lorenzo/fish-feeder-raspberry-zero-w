@@ -44,8 +44,8 @@ def spin_feeder_motor(rotations=1):
 
 # --- LIGHTWEIGHT SNAPSHOT STREAM ---
 def capture_single_frame():
-    global camera_streaming_allowed
-    camera_streaming_allowed = False
+    #global camera_streaming_allowed
+    #camera_streaming_allowed = False
     """Uses the fast rpicam-still immediate mode to capture a lightweight JPEG byte array"""
     cmd = [
         "rpicam-still",
@@ -57,11 +57,11 @@ def capture_single_frame():
     ]
     try:
         result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=3)
-        camera_streaming_allowed = True
+        #camera_streaming_allowed = True
         return result.stdout
     except Exception as e:
         print(f"Camera capture error: {e}")
-        camera_streaming_allowed = True
+        #camera_streaming_allowed = True
         return None
 
 def generate_stream_frames():
@@ -100,6 +100,9 @@ def video_feed():
 @app.route('/feed', methods=['POST'])
 def feed():
     global camera_streaming_allowed
+    # FIX: Block the stream loop from touching the hardware immediately
+    camera_streaming_allowed = False
+    time.sleep(0.3)  # FIX: Give the streaming loop time to exit the hardware
     print("\n--- FEED ROUTE TRIGGERED ---")
     # 1. Spin motor
     spin_feeder_motor(rotations=1)
@@ -119,6 +122,8 @@ def feed():
     with open("database.txt", "a") as f:
         f.write(f"{readable_time},{filename}\n")
         
+    # FIX: Release the camera lock only after the file has successfully been written
+    camera_streaming_allowed = True
     return redirect(url_for('index'))
 
 @app.route('/photos/<filename>')
