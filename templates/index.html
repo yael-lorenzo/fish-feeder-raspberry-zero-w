@@ -46,7 +46,7 @@
     <div class="clock" id="live-clock">Loading Device Time...</div>
 
     <div class="stream-box">
-        <img src="{{ url_for('video_feed') }}" alt="Live Camera Feed Syncing..." style="transform: rotate(-90deg);">
+        <img src="{{ url_for('video_feed') }}" alt="Live Camera Feed Syncing...">
     </div>
 
     <form action="{{ url_for('feed') }}" method="POST">
@@ -97,7 +97,7 @@
         <div class="log-item">
             <span class="log-time">✅ Served at: <strong>{{ log.time }}</strong></span>
             <a href="{{ url_for('get_photo', filename=log.image) }}" target="_blank">
-                <img class="thumbnail" src="{{ url_for('get_photo', filename=log.image) }}" title="Click to view full snapshot" style="transform: rotate(-90deg);">
+                <img class="thumbnail" src="{{ url_for('get_photo', filename=log.image) }}" title="Click to view full snapshot">
             </a>
         </div>
         {% endfor %}
