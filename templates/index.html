@@ -21,6 +21,22 @@
         .log-time { font-size: 1rem; color: #334155; font-weight: 500; }
         .thumbnail { width: 80px; height: 60px; border-radius: 4px; object-fit: cover; cursor: pointer; border: 2px solid #e2e8f0; transition: border 0.2s; }
         .thumbnail:hover { border-color: #2563eb; }
+        .feed-controls { display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap; }
+        .amount-field { display: flex; flex-direction: column; align-items: flex-start; font-size: 0.85rem; color: #64748b; }
+        .amount-field input { width: 70px; padding: 8px; font-size: 1rem; border: 1px solid #cbd5e1; border-radius: 8px; margin-top: 4px; }
+        .card { margin-top: 40px; text-align: left; }
+        .card-title { border-bottom: 2px solid #e2e8f0; padding-bottom: 8px; font-size: 1.4rem; color: #1e293b; }
+        .schedule-add { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin: 18px 0; }
+        .schedule-add label { display: flex; flex-direction: column; font-size: 0.85rem; color: #64748b; }
+        .schedule-add input { padding: 8px; font-size: 1rem; border: 1px solid #cbd5e1; border-radius: 8px; margin-top: 4px; }
+        .btn-add { background: #16a34a; color: white; border: none; padding: 10px 22px; font-size: 1rem; font-weight: bold; border-radius: 8px; cursor: pointer; }
+        .btn-add:hover { background: #15803d; }
+        .sched-item { display: flex; align-items: center; justify-content: space-between; padding: 12px; border-bottom: 1px solid #f1f5f9; }
+        .sched-time { font-size: 1.1rem; font-weight: 600; color: #1e293b; }
+        .sched-amount { color: #64748b; font-size: 0.95rem; }
+        .btn-del { background: #fee2e2; color: #b91c1c; border: none; padding: 6px 14px; border-radius: 8px; cursor: pointer; font-size: 0.9rem; }
+        .btn-del:hover { background: #fecaca; }
+        .hint { color: #94a3b8; font-size: 0.85rem; }
     </style>
 </head>
 <body>
@@ -34,8 +50,43 @@
     </div>
 
     <form action="{{ url_for('feed') }}" method="POST">
-        <button type="submit" class="btn-feed" onclick="this.innerText='Serving Food...';">FEED NOW</button>
+        <div class="feed-controls">
+            <label class="amount-field">Quarter-turns
+                <input type="number" name="quarters" value="4" min="1" step="1">
+            </label>
+            <button type="submit" class="btn-feed" onclick="this.innerText='Serving Food...';">FEED NOW</button>
+        </div>
     </form>
+    <p class="hint" style="margin-top:8px;">4 quarter-turns = 1 full rotation.</p>
+
+    <div class="card">
+        <h3 class="card-title">Feeding Schedule</h3>
+        <form action="{{ url_for('schedule_add') }}" method="POST" class="schedule-add">
+            <label>Time (daily)
+                <input type="time" name="time" required>
+            </label>
+            <label>Quarter-turns
+                <input type="number" name="quarters" value="4" min="1" step="1">
+            </label>
+            <button type="submit" class="btn-add">+ Add</button>
+        </form>
+
+        {% if not schedule %}
+            <p class="hint" style="padding: 12px 0;">No scheduled feedings yet.</p>
+        {% endif %}
+        {% for entry in schedule %}
+        <div class="sched-item">
+            <span>
+                <span class="sched-time">⏰ {{ entry.time }}</span>
+                <span class="sched-amount">— {{ entry.quarters }} quarter-turn{{ 's' if entry.quarters != 1 else '' }}</span>
+            </span>
+            <form action="{{ url_for('schedule_delete') }}" method="POST" style="margin:0;">
+                <input type="hidden" name="id" value="{{ entry.id }}">
+                <button type="submit" class="btn-del">Delete</button>
+            </form>
+        </div>
+        {% endfor %}
+    </div>
 
     <div class="log-section">
         <h3 class="log-title">Feeding Log History</h3>

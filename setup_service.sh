@@ -39,6 +39,28 @@ else
     exit 1
 fi
 
+# 2.5 Initialize persistent data resources (no database needed — plain files)
+echo -e "\n${YELLOW}Initializing data resources...${NC}"
+
+# Photos directory for feed confirmation snapshots
+mkdir -p "$CURRENT_DIR/photos"
+
+# Feeding log (timestamp,filename per line)
+touch "$CURRENT_DIR/database.txt"
+
+# Feeding schedule stored as JSON (created empty only if it doesn't exist yet)
+if [ ! -f "$CURRENT_DIR/schedule.json" ]; then
+    echo '{"entries": []}' > "$CURRENT_DIR/schedule.json"
+    echo -e "${GREEN}✔ Created empty schedule.json${NC}"
+else
+    echo -e "${GREEN}✔ Existing schedule.json preserved${NC}"
+fi
+
+# Make sure the service user owns these files (script may be run with sudo)
+sudo chown -R "$CURRENT_USER":"$CURRENT_USER" "$CURRENT_DIR/photos" "$CURRENT_DIR/database.txt" "$CURRENT_DIR/schedule.json"
+
+echo -e "${GREEN}✔ Data resources ready!${NC}"
+
 # 3. Construct the systemd service file dynamically
 echo -e "\nWriting systemd configuration to ${SERVICE_FILE}..."
 sudo bash -c "cat << EOF > $SERVICE_FILE
