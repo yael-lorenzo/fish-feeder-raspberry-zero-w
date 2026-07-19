@@ -40,6 +40,14 @@ VIDEO_FPS = 15             # capture frame rate
 GIF_FPS = 12               # GIF frame rate — smooth enough to read in the browser
 GIF_WIDTH = 400            # GIF is scaled to this width (height auto) to stay light
 
+def motor_off():
+    """Cut power to every motor coil. Safe to call anytime; never raises."""
+    for pin in motor_pins:
+        try:
+            pin.off()
+        except Exception:
+            pass
+
 def spin_feeder_motor(rotations=1):
     """
     Spins the 28BYJ-48 stepper motor using the working nested loop structure,
@@ -59,8 +67,7 @@ def spin_feeder_motor(rotations=1):
             time.sleep(0.001)
 
     # Cleanly cut power to prevent overheating
-    for pin in motor_pins:
-        pin.off()
+    motor_off()
 
     print("Motor spinning finished.")
 
@@ -150,6 +157,7 @@ def prune_old_history():
     cutoff = datetime.now() - timedelta(days=RETENTION_DAYS)
     kept_lines = []
     removed_files = []
+    pruned_lines = 0
     with open(LOG_FILE, "r") as f:
         for line in f:
             stripped = line.strip()
@@ -164,42 +172,61 @@ def prune_old_history():
             if when >= cutoff:
                 kept_lines.append(stripped)
             else:
-                removed_files.append(filename.strip())
+                # Old line is dropped; remember its clip file (if any) to delete.
+                name = filename.strip()
+                if name:
+                    removed_files.append(name)
+                pruned_lines += 1
 
-    if not removed_files:
+    if pruned_lines == 0:
         return
 
     with open(LOG_FILE, "w") as f:
         for line in kept_lines:
             f.write(line + "\n")
 
-    for filename in removed_files:
-        path = os.path.join("photos", filename)
+    for name in removed_files:
+        path = os.path.join("photos", name)
         try:
             if os.path.exists(path):
                 os.remove(path)
         except OSError as e:
             print(f"Could not remove {path}: {e}")
 
-    print(f"Pruned {len(removed_files)} feed clip(s) older than {RETENTION_DAYS} days.")
+    print(f"Pruned {pruned_lines} old feed record(s), {len(removed_files)} clip file(s), "
+          f"older than {RETENTION_DAYS} days.")
 
 # --- FEED CLIP RECORDING ---
+def _stop_recorder(proc):
+    """Best-effort clean stop of the rpicam-vid process. Never raises."""
+    if proc is None:
+        return
+    try:
+        proc.send_signal(signal.SIGINT)  # lets rpicam-vid finalize the H.264 file
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+    except Exception as e:
+        print(f"Error stopping recorder: {e}")
+
 def record_feed_gif(quarters, gif_path):
     """
-    Record a short clip that starts before the motor spins and ends
-    POST_ROLL_SECONDS after it stops, then save it as an animated GIF.
+    Spin the motor by `quarters` quarter-turns while filming a short clip
+    (pre-roll -> spin -> post-roll), then save it as an animated GIF.
 
-    The motor spin happens *inside* the recording window, so the clip
-    captures the food actually dropping.
+    The motor spin is the ONE guaranteed step: if the camera won't start, the
+    disk is full, ffmpeg is missing, or anything else goes wrong, the fish are
+    still fed. Everything except the spin is best-effort.
+
+    Returns True only if a GIF file was actually produced.
     """
     rotations = quarters * QUARTER_ROTATION
     h264_path = gif_path[:-4] + ".h264"  # gif_path ends in ".gif"
 
-    # Start the recorder running open-ended (-t 0); we stop it ourselves so the
-    # clip length tracks the real motor time instead of a guessed duration.
     record_cmd = [
-        "rpicam-vid",
-        "-t", "0",
+        "rpicam-vid", "-t", "0",
         "--width", str(VIDEO_WIDTH),
         "--height", str(VIDEO_HEIGHT),
         "--framerate", str(VIDEO_FPS),
@@ -207,22 +234,34 @@ def record_feed_gif(quarters, gif_path):
         "--nopreview",
         "-o", h264_path,
     ]
-    proc = subprocess.Popen(record_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    try:
-        time.sleep(PRE_ROLL_SECONDS)          # a moment before the food drops
-        spin_feeder_motor(rotations=rotations)
-        time.sleep(POST_ROLL_SECONDS)         # keep filming after the motor stops
-    finally:
-        # SIGINT lets rpicam-vid finalize the H.264 file cleanly.
-        proc.send_signal(signal.SIGINT)
-        try:
-            proc.wait(timeout=5)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
 
-    # Convert the raw H.264 into a web-friendly animated GIF (palette pass for
-    # good color at small size).
+    # 1. Best-effort: start filming before the food drops. A failure here
+    #    (camera busy, no disk space for the clip) must not stop the feed.
+    proc = None
+    try:
+        proc = subprocess.Popen(record_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time.sleep(PRE_ROLL_SECONDS)
+    except Exception as e:
+        print(f"Feed recording failed to start (feeding anyway): {e}")
+        _stop_recorder(proc)
+        proc = None
+
+    # 2. CRITICAL: spin the motor no matter what happened above.
+    try:
+        spin_feeder_motor(rotations=rotations)
+    except Exception as e:
+        print(f"Motor error during feed: {e}")
+        motor_off()  # never leave the coils energized
+
+    # 3. Best-effort: finish the clip and convert it to a GIF.
+    if proc is None:
+        return False
+    try:
+        time.sleep(POST_ROLL_SECONDS)  # keep filming after the motor stops
+    except Exception:
+        pass
+    _stop_recorder(proc)
+
     convert_cmd = [
         "ffmpeg", "-y",
         "-r", str(VIDEO_FPS),
@@ -236,14 +275,22 @@ def record_feed_gif(quarters, gif_path):
     except Exception as e:
         print(f"GIF conversion error: {e}")
     finally:
-        if os.path.exists(h264_path):
-            os.remove(h264_path)
+        try:
+            if os.path.exists(h264_path):
+                os.remove(h264_path)
+        except OSError as e:
+            print(f"Could not remove temp clip: {e}")
 
     return os.path.exists(gif_path)
 
 # --- CORE FEED ACTION (shared by manual button and scheduler) ---
 def perform_feed(quarters=4):
-    """Record a feed clip while spinning the motor by `quarters` quarter-turns, then log it."""
+    """
+    Feed the fish by spinning the motor `quarters` quarter-turns.
+
+    The spin is guaranteed; recording and logging are best-effort, so a full
+    disk or a camera/ffmpeg problem can never prevent a feeding.
+    """
     global camera_streaming_allowed
     quarters = clean_quarters(quarters)
 
@@ -252,17 +299,25 @@ def perform_feed(quarters=4):
         camera_streaming_allowed = False
         time.sleep(0.3)
         print(f"\n--- FEEDING: {quarters} quarter-turn(s) = {quarters * QUARTER_ROTATION} rotation(s) ---")
+        filename = f"feed_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.gif"
+        filepath = os.path.join("photos", filename)
         try:
-            # Record the clip (this is what spins the motor) and save it as a GIF.
-            filename = f"feed_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.gif"
-            filepath = os.path.join("photos", filename)
-            if not record_feed_gif(quarters, filepath):
-                print("Warning: GIF was not produced.")
+            # This call spins the motor (guaranteed) and tries to save a GIF.
+            gif_ok = record_feed_gif(quarters, filepath)
+            if not gif_ok:
+                print("Warning: GIF was not produced (feed still happened).")
 
-            # Log the event (the log/thumbnails render the GIF directly).
-            readable_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            with open(LOG_FILE, "a") as f:
-                f.write(f"{readable_time},{filename}\n")
+            # Best-effort log. Always record that a feeding occurred; only point
+            # at a clip file if one was actually written.
+            try:
+                readable_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                with open(LOG_FILE, "a") as f:
+                    f.write(f"{readable_time},{filename if gif_ok else ''}\n")
+            except OSError as e:
+                print(f"Could not write feed log (feed still happened): {e}")
+        except Exception as e:
+            # Anything unexpected in the recording/logging path is non-fatal.
+            print(f"Feed flow error (motor handled independently): {e}")
         finally:
             # Release the camera lock only after all hardware work is done.
             camera_streaming_allowed = True

@@ -100,9 +100,13 @@
         {% for log in logs %}
         <div class="log-item">
             <span class="log-time">✅ Served at: <strong>{{ log.time }}</strong></span>
+            {% if log.image %}
             <a href="{{ url_for('get_photo', filename=log.image) }}" target="_blank">
                 <img class="thumbnail" src="{{ url_for('get_photo', filename=log.image) }}" title="Click to view the full clip" loading="lazy">
             </a>
+            {% else %}
+            <span class="hint">no clip</span>
+            {% endif %}
         </div>
         {% endfor %}
 
