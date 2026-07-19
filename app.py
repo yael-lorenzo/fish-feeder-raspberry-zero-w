@@ -1,6 +1,7 @@
 import os
 import time
 import json
+import signal
 import threading
 from datetime import datetime
 import subprocess
@@ -26,6 +27,15 @@ SCHEDULE_FILE = "schedule.json"
 QUARTER_ROTATION = 0.25
 # Serialize hardware access so a manual feed and a scheduled feed never overlap.
 feed_lock = threading.Lock()
+
+# --- FEED CLIP (GIF) CONFIG ---
+PRE_ROLL_SECONDS = 1.0     # keep filming this long BEFORE the motor starts
+POST_ROLL_SECONDS = 3.0    # keep filming this long AFTER the motor stops
+VIDEO_WIDTH = 640          # capture resolution (kept modest for the Pi Zero)
+VIDEO_HEIGHT = 480
+VIDEO_FPS = 15             # capture frame rate
+GIF_FPS = 12               # GIF frame rate — smooth enough to read in the browser
+GIF_WIDTH = 400            # GIF is scaled to this width (height auto) to stay light
 
 def spin_feeder_motor(rotations=1):
     """
@@ -112,32 +122,83 @@ def clean_quarters(value, default=4):
     except (TypeError, ValueError):
         return default
 
+# --- FEED CLIP RECORDING ---
+def record_feed_gif(quarters, gif_path):
+    """
+    Record a short clip that starts before the motor spins and ends
+    POST_ROLL_SECONDS after it stops, then save it as an animated GIF.
+
+    The motor spin happens *inside* the recording window, so the clip
+    captures the food actually dropping.
+    """
+    rotations = quarters * QUARTER_ROTATION
+    h264_path = gif_path[:-4] + ".h264"  # gif_path ends in ".gif"
+
+    # Start the recorder running open-ended (-t 0); we stop it ourselves so the
+    # clip length tracks the real motor time instead of a guessed duration.
+    record_cmd = [
+        "rpicam-vid",
+        "-t", "0",
+        "--width", str(VIDEO_WIDTH),
+        "--height", str(VIDEO_HEIGHT),
+        "--framerate", str(VIDEO_FPS),
+        "--codec", "h264",
+        "--nopreview",
+        "-o", h264_path,
+    ]
+    proc = subprocess.Popen(record_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        time.sleep(PRE_ROLL_SECONDS)          # a moment before the food drops
+        spin_feeder_motor(rotations=rotations)
+        time.sleep(POST_ROLL_SECONDS)         # keep filming after the motor stops
+    finally:
+        # SIGINT lets rpicam-vid finalize the H.264 file cleanly.
+        proc.send_signal(signal.SIGINT)
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+
+    # Convert the raw H.264 into a web-friendly animated GIF (palette pass for
+    # good color at small size).
+    convert_cmd = [
+        "ffmpeg", "-y",
+        "-r", str(VIDEO_FPS),
+        "-i", h264_path,
+        "-vf", (f"fps={GIF_FPS},scale={GIF_WIDTH}:-1:flags=lanczos,"
+                "split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse"),
+        gif_path,
+    ]
+    try:
+        subprocess.run(convert_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120)
+    except Exception as e:
+        print(f"GIF conversion error: {e}")
+    finally:
+        if os.path.exists(h264_path):
+            os.remove(h264_path)
+
+    return os.path.exists(gif_path)
+
 # --- CORE FEED ACTION (shared by manual button and scheduler) ---
 def perform_feed(quarters=4):
-    """Spin the motor by `quarters` quarter-turns, snap a photo, and log the event."""
+    """Record a feed clip while spinning the motor by `quarters` quarter-turns, then log it."""
     global camera_streaming_allowed
     quarters = clean_quarters(quarters)
-    rotations = quarters * QUARTER_ROTATION
 
     with feed_lock:
         # Block the stream loop from touching the hardware, and give it time to let go.
         camera_streaming_allowed = False
         time.sleep(0.3)
-        print(f"\n--- FEEDING: {quarters} quarter-turn(s) = {rotations} rotation(s) ---")
+        print(f"\n--- FEEDING: {quarters} quarter-turn(s) = {quarters * QUARTER_ROTATION} rotation(s) ---")
         try:
-            # 1. Spin motor
-            spin_feeder_motor(rotations=rotations)
-            time.sleep(1)
-
-            # 2. Capture a confirmation photo
-            filename = f"feed_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.jpg"
+            # Record the clip (this is what spins the motor) and save it as a GIF.
+            filename = f"feed_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.gif"
             filepath = os.path.join("photos", filename)
-            frame = capture_single_frame()
-            if frame:
-                with open(filepath, "wb") as f:
-                    f.write(frame)
+            if not record_feed_gif(quarters, filepath):
+                print("Warning: GIF was not produced.")
 
-            # 3. Log data
+            # Log the event (the log/thumbnails render the GIF directly).
             readable_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             with open("database.txt", "a") as f:
                 f.write(f"{readable_time},{filename}\n")

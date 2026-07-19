@@ -30,7 +30,8 @@ fi
 echo -e "\n${YELLOW}Checking and installing required Python system packages...${NC}"
 echo -e "This might take a minute on a Pi Zero..."
 sudo apt update -y
-sudo apt install python3-pip python3-flask python3-gpiozero python3-pil -y
+# ffmpeg is required to turn the recorded feed clip into an animated GIF.
+sudo apt install python3-pip python3-flask python3-gpiozero python3-pil ffmpeg -y
 
 if [ $? -eq 0 ]; then
     echo -e "${GREEN}✔ System dependencies installed perfectly!${NC}"
