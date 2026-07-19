@@ -37,6 +37,10 @@
         .btn-del { background: #fee2e2; color: #b91c1c; border: none; padding: 6px 14px; border-radius: 8px; cursor: pointer; font-size: 0.9rem; }
         .btn-del:hover { background: #fecaca; }
         .hint { color: #94a3b8; font-size: 0.85rem; }
+        .pagination { display: flex; align-items: center; justify-content: space-between; margin-top: 18px; }
+        .page-link { text-decoration: none; background: #eff6ff; color: #2563eb; padding: 8px 16px; border-radius: 8px; font-size: 0.95rem; font-weight: 500; }
+        .page-link:hover { background: #dbeafe; }
+        .page-link.disabled { background: #f1f5f9; color: #cbd5e1; cursor: default; }
     </style>
 </head>
 <body>
@@ -89,18 +93,31 @@
     </div>
 
     <div class="log-section">
-        <h3 class="log-title">Feeding Log History</h3>
+        <h3 class="log-title">Feeding Log — {{ viewed_day }}{% if is_today %} (Today){% endif %}</h3>
         {% if not logs %}
-            <p style="color:#94a3b8; text-align:center; padding: 20px;">No feeding events recorded yet.</p>
+            <p style="color:#94a3b8; text-align:center; padding: 20px;">No feedings recorded on this day.</p>
         {% endif %}
         {% for log in logs %}
         <div class="log-item">
             <span class="log-time">✅ Served at: <strong>{{ log.time }}</strong></span>
             <a href="{{ url_for('get_photo', filename=log.image) }}" target="_blank">
-                <img class="thumbnail" src="{{ url_for('get_photo', filename=log.image) }}" title="Click to view full snapshot">
+                <img class="thumbnail" src="{{ url_for('get_photo', filename=log.image) }}" title="Click to view the full clip" loading="lazy">
             </a>
         </div>
         {% endfor %}
+
+        <div class="pagination">
+            {% if prev_day %}
+                <a class="page-link" href="{{ url_for('index', day=prev_day) }}">← {{ prev_day }}</a>
+            {% else %}
+                <span class="page-link disabled">← Older</span>
+            {% endif %}
+            {% if next_day %}
+                <a class="page-link" href="{{ url_for('index', day=next_day) }}">{{ next_day }} →</a>
+            {% else %}
+                <span class="page-link disabled">Newer →</span>
+            {% endif %}
+        </div>
     </div>
 </div>
 

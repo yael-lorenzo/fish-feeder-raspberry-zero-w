@@ -3,7 +3,7 @@ import time
 import json
 import signal
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 import subprocess
 from flask import Flask, render_template, Response, redirect, url_for, send_from_directory, request
 from gpiozero import OutputDevice
@@ -23,6 +23,9 @@ camera_streaming_allowed = True
 
 # --- SCHEDULE / FEED CONFIG ---
 SCHEDULE_FILE = "schedule.json"
+LOG_FILE = "database.txt"
+# Feed clips (and their log lines) older than this many days are deleted automatically.
+RETENTION_DAYS = 30
 # One motor "quarter" = a quarter of a full physical rotation.
 QUARTER_ROTATION = 0.25
 # Serialize hardware access so a manual feed and a scheduled feed never overlap.
@@ -122,6 +125,64 @@ def clean_quarters(value, default=4):
     except (TypeError, ValueError):
         return default
 
+# --- FEED HISTORY (plain text log + clip files) ---
+def read_logs():
+    """Return feed events in chronological order: [{'time','image','date'}]."""
+    logs = []
+    if os.path.exists(LOG_FILE):
+        with open(LOG_FILE, "r") as f:
+            for line in f:
+                line = line.strip()
+                if "," not in line:
+                    continue
+                timestamp, filename = line.split(",", 1)
+                logs.append({
+                    "time": timestamp,
+                    "image": filename,
+                    "date": timestamp.split(" ")[0],  # "YYYY-MM-DD"
+                })
+    return logs
+
+def prune_old_history():
+    """Delete log lines and clip files older than RETENTION_DAYS."""
+    if not os.path.exists(LOG_FILE):
+        return
+    cutoff = datetime.now() - timedelta(days=RETENTION_DAYS)
+    kept_lines = []
+    removed_files = []
+    with open(LOG_FILE, "r") as f:
+        for line in f:
+            stripped = line.strip()
+            if "," not in stripped:
+                continue
+            timestamp, filename = stripped.split(",", 1)
+            try:
+                when = datetime.strptime(timestamp.strip(), "%Y-%m-%d %H:%M:%S")
+            except ValueError:
+                kept_lines.append(stripped)  # keep anything we can't parse
+                continue
+            if when >= cutoff:
+                kept_lines.append(stripped)
+            else:
+                removed_files.append(filename.strip())
+
+    if not removed_files:
+        return
+
+    with open(LOG_FILE, "w") as f:
+        for line in kept_lines:
+            f.write(line + "\n")
+
+    for filename in removed_files:
+        path = os.path.join("photos", filename)
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+        except OSError as e:
+            print(f"Could not remove {path}: {e}")
+
+    print(f"Pruned {len(removed_files)} feed clip(s) older than {RETENTION_DAYS} days.")
+
 # --- FEED CLIP RECORDING ---
 def record_feed_gif(quarters, gif_path):
     """
@@ -200,7 +261,7 @@ def perform_feed(quarters=4):
 
             # Log the event (the log/thumbnails render the GIF directly).
             readable_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            with open("database.txt", "a") as f:
+            with open(LOG_FILE, "a") as f:
                 f.write(f"{readable_time},{filename}\n")
         finally:
             # Release the camera lock only after all hardware work is done.
@@ -208,11 +269,20 @@ def perform_feed(quarters=4):
 
 # --- BACKGROUND SCHEDULER ---
 def scheduler_loop():
-    """Fire scheduled feedings once per matching minute."""
+    """Fire scheduled feedings once per matching minute, and prune history once a day."""
     print("Scheduler thread started.")
     last_minute = None
+    last_prune_day = None
     while True:
-        now = datetime.now().strftime("%H:%M")
+        now_dt = datetime.now()
+        today = now_dt.strftime("%Y-%m-%d")
+
+        # Prune at startup and whenever the calendar day rolls over.
+        if today != last_prune_day:
+            prune_old_history()
+            last_prune_day = today
+
+        now = now_dt.strftime("%H:%M")
         if now != last_minute:
             for entry in load_schedule().get("entries", []):
                 if entry.get("time") == now:
@@ -225,17 +295,38 @@ def scheduler_loop():
 
 @app.route('/')
 def index():
-    logs = []
-    if os.path.exists("database.txt"):
-        with open("database.txt", "r") as f:
-            for line in f.readlines():
-                if "," in line:
-                    timestamp, filename = line.strip().split(",")
-                    logs.append({"time": timestamp, "image": filename})
-    logs.reverse()
+    all_logs = read_logs()
+    today_str = datetime.now().strftime("%Y-%m-%d")
+
+    # The page shows a single day; default to today. Navigation jumps between
+    # days that actually have feeds, so you never page through empty days.
+    day = request.args.get('day', today_str)
+    try:
+        datetime.strptime(day, "%Y-%m-%d")
+    except ValueError:
+        day = today_str
+
+    days_with_entries = sorted({log["date"] for log in all_logs}, reverse=True)
+    day_logs = [log for log in all_logs if log["date"] == day]
+    day_logs.reverse()  # newest feed first within the day
+
+    older = [d for d in days_with_entries if d < day]   # desc order
+    newer = [d for d in days_with_entries if d > day]
+    prev_day = older[0] if older else None    # nearest older day with feeds
+    next_day = newer[-1] if newer else None   # nearest newer day with feeds
+
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     schedule = sorted(load_schedule().get("entries", []), key=lambda e: e.get("time", ""))
-    return render_template('index.html', current_time=current_time, logs=logs, schedule=schedule)
+    return render_template(
+        'index.html',
+        current_time=current_time,
+        logs=day_logs,
+        schedule=schedule,
+        viewed_day=day,
+        is_today=(day == today_str),
+        prev_day=prev_day,
+        next_day=next_day,
+    )
 
 @app.route('/video_feed')
 def video_feed():
