@@ -24,3 +24,37 @@ The system utilizes a Raspberry Pi Zero connected to a 28BYJ-48 stepper motor vi
 * **Python Initialization Array:** In the software configuration (`app.py`), the motor pin definition array maps directly to the BCM numbers:
   ```python
   motor_pins = [gpiozero.OutputDevice(p) for p in [17, 18, 27, 22]]
+
+### Tailscale Remote Access
+
+To access the fish feeder interface securely from outside the local home network without opening public router ports or running the Flask application as root, the system utilizes **Tailscale** and its secure reverse proxy capabilities.
+
+#### 1. Installation
+Install Tailscale on the Raspberry Pi by running the official setup script:
+```bash
+curl -fsSL [https://tailscale.com/install.sh](https://tailscale.com/install.sh) | sh
+
+Once installed, authenticate the machine to your Tailnet by running:
+
+```bash
+sudo tailscale up
+
+#### 2. Exposing the Flask App Safely
+Because the Flask application runs on port 5000 under an unprivileged user account for security reasons, Tailscale handles the secure HTTPS port 443 binding and forwards the traffic internally.
+
+Run the background proxy routing command:
+
+```bash
+tailscale serve --bg [http://127.0.0.1:5000](http://127.0.0.1:5000)
+Verify that the proxy configuration is active and fetch your unique .ts.net address by running:
+
+```bash
+tailscale serve status
+#### 3. Accessing the Application
+Your private global URL will look like:
+https://fish-feeder.mammut-saturation.ts.net
+
+⚠️ CRITICAL NOTE ON USAGE:
+Because .ts.net domains are part of a secure, private network layer and are not exposed to the public internet, the Tailscale client application must be explicitly turned ON and connected on the device you are browsing from (e.g., your smartphone or laptop).
+
+If the Tailscale client app is turned off on your device, the domain will fail to resolve and will result in a DNS_PROBE_FINISHED_NXDOMAIN error.
