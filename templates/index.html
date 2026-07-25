@@ -34,8 +34,13 @@
         .sched-item { display: flex; align-items: center; justify-content: space-between; padding: 12px; border-bottom: 1px solid #f1f5f9; }
         .sched-time { font-size: 1.1rem; font-weight: 600; color: #1e293b; }
         .sched-amount { color: #64748b; font-size: 0.95rem; }
+        .sched-actions { display: flex; gap: 8px; align-items: center; }
         .btn-del { background: #fee2e2; color: #b91c1c; border: none; padding: 6px 14px; border-radius: 8px; cursor: pointer; font-size: 0.9rem; }
         .btn-del:hover { background: #fecaca; }
+        .btn-skip { background: #fef3c7; color: #92400e; border: none; padding: 6px 14px; border-radius: 8px; cursor: pointer; font-size: 0.9rem; }
+        .btn-skip:hover { background: #fde68a; }
+        .btn-skip.armed { background: #f59e0b; color: #fff; }
+        .skip-badge { background: #fffbeb; color: #b45309; border: 1px solid #fcd34d; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem; margin-left: 8px; white-space: nowrap; }
         .hint { color: #94a3b8; font-size: 0.85rem; }
         .pagination { display: flex; align-items: center; justify-content: space-between; margin-top: 18px; }
         .page-link { text-decoration: none; background: #eff6ff; color: #2563eb; padding: 8px 16px; border-radius: 8px; font-size: 0.95rem; font-weight: 500; }
@@ -83,11 +88,20 @@
             <span>
                 <span class="sched-time">⏰ {{ entry.time }}</span>
                 <span class="sched-amount">— {{ entry.quarters }} quarter-turn{{ 's' if entry.quarters != 1 else '' }}</span>
+                {% if entry.skip_next %}<span class="skip-badge">⏭ next feed skipped</span>{% endif %}
             </span>
-            <form action="{{ url_for('schedule_delete') }}" method="POST" style="margin:0;">
-                <input type="hidden" name="id" value="{{ entry.id }}">
-                <button type="submit" class="btn-del">Delete</button>
-            </form>
+            <span class="sched-actions">
+                <form action="{{ url_for('schedule_skip') }}" method="POST" style="margin:0;">
+                    <input type="hidden" name="id" value="{{ entry.id }}">
+                    <button type="submit" class="btn-skip {{ 'armed' if entry.skip_next else '' }}">
+                        {{ 'Un-skip' if entry.skip_next else 'Skip next' }}
+                    </button>
+                </form>
+                <form action="{{ url_for('schedule_delete') }}" method="POST" style="margin:0;">
+                    <input type="hidden" name="id" value="{{ entry.id }}">
+                    <button type="submit" class="btn-del">Delete</button>
+                </form>
+            </span>
         </div>
         {% endfor %}
     </div>

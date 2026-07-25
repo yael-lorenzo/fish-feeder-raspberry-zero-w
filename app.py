@@ -339,10 +339,26 @@ def scheduler_loop():
 
         now = now_dt.strftime("%H:%M")
         if now != last_minute:
-            for entry in load_schedule().get("entries", []):
-                if entry.get("time") == now:
-                    print(f"Scheduled feed triggered at {now}")
-                    perform_feed(entry.get("quarters", 4))
+            schedule = load_schedule()
+            to_feed = []
+            skip_consumed = False
+            for entry in schedule.get("entries", []):
+                if entry.get("time") != now:
+                    continue
+                if entry.get("skip_next"):
+                    print(f"Skipping scheduled feed at {now} (one-time skip): entry {entry.get('id')}")
+                    entry["skip_next"] = False   # consume the one-time skip
+                    skip_consumed = True
+                else:
+                    to_feed.append(entry.get("quarters", 4))
+
+            # Persist the cleared skip flag(s) before the (slow) feed runs.
+            if skip_consumed:
+                save_schedule(schedule)
+
+            for quarters in to_feed:
+                print(f"Scheduled feed triggered at {now}")
+                perform_feed(quarters)
             last_minute = now
         time.sleep(15)
 
@@ -409,6 +425,7 @@ def schedule_add():
         "id": str(int(time.time() * 1000)),
         "time": entry_time,
         "quarters": quarters,
+        "skip_next": False,  # one-time "skip the next occurrence" flag
     })
     save_schedule(data)
     return redirect(url_for('index'))
@@ -418,6 +435,18 @@ def schedule_delete():
     entry_id = request.form.get('id')
     data = load_schedule()
     data["entries"] = [e for e in data["entries"] if e.get("id") != entry_id]
+    save_schedule(data)
+    return redirect(url_for('index'))
+
+@app.route('/schedule/skip', methods=['POST'])
+def schedule_skip():
+    """Arm/disarm a one-time skip of the next occurrence of a schedule entry."""
+    entry_id = request.form.get('id')
+    data = load_schedule()
+    for entry in data["entries"]:
+        if entry.get("id") == entry_id:
+            entry["skip_next"] = not entry.get("skip_next", False)
+            break
     save_schedule(data)
     return redirect(url_for('index'))
 
