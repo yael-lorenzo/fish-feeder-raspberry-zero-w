@@ -33,7 +33,7 @@ feed_lock = threading.Lock()
 
 # --- FEED CLIP (GIF) CONFIG ---
 PRE_ROLL_SECONDS = 1.0     # keep filming this long BEFORE the motor starts
-POST_ROLL_SECONDS = 3.0    # keep filming this long AFTER the motor stops
+POST_ROLL_SECONDS = 6.0    # keep filming this long AFTER the motor stops
 VIDEO_WIDTH = 640          # capture resolution (kept modest for the Pi Zero)
 VIDEO_HEIGHT = 480
 VIDEO_FPS = 15             # capture frame rate
