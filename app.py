@@ -33,11 +33,11 @@ feed_lock = threading.Lock()
 
 # --- FEED CLIP (GIF) CONFIG ---
 PRE_ROLL_SECONDS = 1.0     # keep filming this long BEFORE the motor starts
-POST_ROLL_SECONDS = 6.0    # keep filming this long AFTER the motor stops
+POST_ROLL_SECONDS = 4.0    # keep filming this long AFTER the motor stops
 VIDEO_WIDTH = 640          # capture resolution (kept modest for the Pi Zero)
 VIDEO_HEIGHT = 480
 VIDEO_FPS = 15             # capture frame rate
-GIF_FPS = 12               # GIF frame rate — smooth enough to read in the browser
+GIF_FPS = 10               # GIF frame rate — smooth enough to read in the browser
 GIF_WIDTH = 400            # GIF is scaled to this width (height auto) to stay light
 CONVERT_TIMEOUT = 240      # max seconds for the ffmpeg GIF conversion (Pi Zero is slow)
 DRYRUN_FILE = "dryrun_latest.gif"  # single reusable test clip, overwritten each dry run
@@ -271,29 +271,36 @@ def record_feed_gif(quarters, gif_path, spin=True):
         pass
     _stop_recorder(proc)
 
-    # Convert into a TEMP file first, then rename into place only if ffmpeg
-    # actually succeeded. This guarantees a broken/partial GIF (e.g. ffmpeg
-    # killed by the timeout) never gets published under the real filename.
+    # Convert to GIF with a TWO-PASS palette. Pass 1 writes a 256-color palette
+    # to a temp PNG; pass 2 applies it. Each pass STREAMS the video once with a
+    # tiny memory footprint. (The single-command "split...palettegen...paletteuse"
+    # buffers the whole clip in RAM and OOMs on the Pi Zero for longer clips.)
+    #
+    # We convert into a TEMP file and only rename it into place on success, so a
+    # broken/partial GIF is never published under the real filename.
     gif_tmp = gif_path + ".part"
-    convert_cmd = [
-        "ffmpeg", "-y",
-        "-r", str(VIDEO_FPS),
-        "-i", h264_path,
-        "-vf", (f"fps={GIF_FPS},scale={GIF_WIDTH}:-1:flags=lanczos,"
-                "split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse"),
-        "-f", "gif",
-        gif_tmp,
-    ]
+    palette = gif_path + ".palette.png"
+    vf = f"fps={GIF_FPS},scale={GIF_WIDTH}:-1:flags=lanczos"
+    pass1 = ["ffmpeg", "-y", "-r", str(VIDEO_FPS), "-i", h264_path,
+             "-vf", f"{vf},palettegen", palette]
+    pass2 = ["ffmpeg", "-y", "-r", str(VIDEO_FPS), "-i", h264_path, "-i", palette,
+             "-lavfi", f"{vf}[x];[x][1:v]paletteuse", "-f", "gif", gif_tmp]
+
+    def _tail(stderr):
+        return " | ".join((stderr or b"").decode("utf-8", "replace").strip().splitlines()[-6:])
+
     ok = False
     try:
-        result = subprocess.run(convert_cmd, stdout=subprocess.DEVNULL,
-                                stderr=subprocess.PIPE, timeout=CONVERT_TIMEOUT)
-        if result.returncode == 0 and os.path.exists(gif_tmp) and os.path.getsize(gif_tmp) > 0:
-            os.replace(gif_tmp, gif_path)  # atomic publish of a complete file
-            ok = True
+        r1 = subprocess.run(pass1, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=CONVERT_TIMEOUT)
+        if r1.returncode != 0:
+            print(f"Palette generation failed (rc={r1.returncode}): {_tail(r1.stderr)}")
         else:
-            tail = (result.stderr or b"").decode("utf-8", "replace").strip().splitlines()[-3:]
-            print(f"GIF conversion failed (rc={result.returncode}): {' | '.join(tail)}")
+            r2 = subprocess.run(pass2, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=CONVERT_TIMEOUT)
+            if r2.returncode == 0 and os.path.exists(gif_tmp) and os.path.getsize(gif_tmp) > 0:
+                os.replace(gif_tmp, gif_path)  # atomic publish of a complete file
+                ok = True
+            else:
+                print(f"GIF conversion failed (rc={r2.returncode}): {_tail(r2.stderr)}")
     except subprocess.TimeoutExpired:
         print(f"GIF conversion timed out after {CONVERT_TIMEOUT}s — clip too long/Pi too busy.")
     except Exception as e:
@@ -301,7 +308,7 @@ def record_feed_gif(quarters, gif_path, spin=True):
     finally:
         # Never leave temp artifacts behind, and never leave a partial GIF at
         # the real path (e.g. from an earlier failed attempt).
-        for path in (h264_path, gif_tmp):
+        for path in (h264_path, gif_tmp, palette):
             try:
                 if os.path.exists(path):
                     os.remove(path)

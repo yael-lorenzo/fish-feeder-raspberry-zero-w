@@ -72,6 +72,8 @@ After=network.target
 [Service]
 ExecStart=/usr/bin/python3 $CURRENT_DIR/app.py
 WorkingDirectory=$CURRENT_DIR
+# Unbuffered stdout so our print() diagnostics reach journald immediately.
+Environment=PYTHONUNBUFFERED=1
 StandardOutput=inherit
 StandardError=inherit
 Restart=always
