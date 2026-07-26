@@ -40,6 +40,7 @@ VIDEO_FPS = 15             # capture frame rate
 GIF_FPS = 12               # GIF frame rate — smooth enough to read in the browser
 GIF_WIDTH = 400            # GIF is scaled to this width (height auto) to stay light
 CONVERT_TIMEOUT = 240      # max seconds for the ffmpeg GIF conversion (Pi Zero is slow)
+DRYRUN_FILE = "dryrun_latest.gif"  # single reusable test clip, overwritten each dry run
 
 def motor_off():
     """Cut power to every motor coil. Safe to call anytime; never raises."""
@@ -212,14 +213,14 @@ def _stop_recorder(proc):
     except Exception as e:
         print(f"Error stopping recorder: {e}")
 
-def record_feed_gif(quarters, gif_path):
+def record_feed_gif(quarters, gif_path, spin=True):
     """
-    Spin the motor by `quarters` quarter-turns while filming a short clip
-    (pre-roll -> spin -> post-roll), then save it as an animated GIF.
+    Film a short clip (pre-roll -> motor -> post-roll) and save it as a GIF.
 
-    The motor spin is the ONE guaranteed step: if the camera won't start, the
-    disk is full, ffmpeg is missing, or anything else goes wrong, the fish are
-    still fed. Everything except the spin is best-effort.
+    With spin=True the motor actually turns `quarters` quarter-turns — this is
+    the ONE guaranteed step of a real feed. With spin=False (dry run) the motor
+    stays still but we hold for the same estimated duration, so the clip and its
+    conversion cost match a real feed without dispensing food.
 
     Returns True only if a GIF file was actually produced.
     """
@@ -248,8 +249,15 @@ def record_feed_gif(quarters, gif_path):
         proc = None
 
     # 2. CRITICAL: spin the motor no matter what happened above.
+    #    Dry run: skip the spin but hold for the same estimated time so the
+    #    clip length (and thus conversion cost) mirrors a real feed.
     try:
-        spin_feeder_motor(rotations=rotations)
+        if spin:
+            spin_feeder_motor(rotations=rotations)
+        else:
+            est_spin = 684 * rotations * len(step_sequence) * 0.001
+            print(f"DRY RUN: holding ~{est_spin:.1f}s, motor NOT moving.")
+            time.sleep(est_spin)
     except Exception as e:
         print(f"Motor error during feed: {e}")
         motor_off()  # never leave the coils energized
@@ -346,6 +354,30 @@ def perform_feed(quarters=4):
             # Release the camera lock only after all hardware work is done.
             camera_streaming_allowed = True
 
+def perform_dry_run(quarters=4):
+    """
+    Test the camera + GIF pipeline WITHOUT feeding: records and converts a clip
+    exactly like a real feed, but the motor never moves. The result overwrites a
+    single reusable file and is NOT added to the feeding log.
+
+    Returns True if a valid GIF was produced (pipeline healthy).
+    """
+    global camera_streaming_allowed
+    quarters = clean_quarters(quarters)
+
+    with feed_lock:
+        camera_streaming_allowed = False
+        time.sleep(0.3)
+        print(f"\n--- DRY RUN: recording test clip (motor OFF) ---")
+        try:
+            filepath = os.path.join("photos", DRYRUN_FILE)
+            return record_feed_gif(quarters, filepath, spin=False)
+        except Exception as e:
+            print(f"Dry run error: {e}")
+            return False
+        finally:
+            camera_streaming_allowed = True
+
 # --- BACKGROUND SCHEDULER ---
 def scheduler_loop():
     """Fire scheduled feedings once per matching minute, and prune history once a day."""
@@ -412,6 +444,13 @@ def index():
 
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     schedule = sorted(load_schedule().get("entries", []), key=lambda e: e.get("time", ""))
+
+    # Dry-run status banner + preview of the latest test clip (cache-busted by mtime).
+    dryrun_status = request.args.get('dryrun')  # 'ok' | 'err' | None
+    dryrun_path = os.path.join("photos", DRYRUN_FILE)
+    dryrun_available = os.path.exists(dryrun_path)
+    dryrun_mtime = int(os.path.getmtime(dryrun_path)) if dryrun_available else 0
+
     return render_template(
         'index.html',
         current_time=current_time,
@@ -421,6 +460,10 @@ def index():
         is_today=(day == today_str),
         prev_day=prev_day,
         next_day=next_day,
+        dryrun_status=dryrun_status,
+        dryrun_available=dryrun_available,
+        dryrun_file=DRYRUN_FILE,
+        dryrun_mtime=dryrun_mtime,
     )
 
 @app.route('/video_feed')
@@ -432,6 +475,12 @@ def feed():
     quarters = clean_quarters(request.form.get('quarters'), default=4)
     perform_feed(quarters)
     return redirect(url_for('index'))
+
+@app.route('/dryrun', methods=['POST'])
+def dryrun():
+    quarters = clean_quarters(request.form.get('quarters'), default=4)
+    ok = perform_dry_run(quarters)
+    return redirect(url_for('index', dryrun=('ok' if ok else 'err')))
 
 @app.route('/schedule/add', methods=['POST'])
 def schedule_add():

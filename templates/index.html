@@ -46,6 +46,13 @@
         .page-link { text-decoration: none; background: #eff6ff; color: #2563eb; padding: 8px 16px; border-radius: 8px; font-size: 0.95rem; font-weight: 500; }
         .page-link:hover { background: #dbeafe; }
         .page-link.disabled { background: #f1f5f9; color: #cbd5e1; cursor: default; }
+        .btn-dryrun { background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; padding: 12px 20px; font-size: 1rem; font-weight: 600; border-radius: 50px; cursor: pointer; }
+        .btn-dryrun:hover { background: #e2e8f0; }
+        .banner { margin: 14px auto 0; padding: 12px 16px; border-radius: 10px; font-size: 0.95rem; max-width: 420px; }
+        .banner.ok { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
+        .banner.err { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
+        .dryrun-preview { margin-top: 14px; }
+        .dryrun-gif { max-width: 100%; border-radius: 8px; border: 2px dashed #cbd5e1; }
     </style>
 </head>
 <body>
@@ -64,9 +71,25 @@
                 <input type="number" name="quarters" value="4" min="1" step="1">
             </label>
             <button type="submit" class="btn-feed" onclick="this.innerText='Serving Food...';">FEED NOW</button>
+            <button type="submit" class="btn-dryrun" formaction="{{ url_for('dryrun') }}"
+                    onclick="this.innerText='Recording test…';"
+                    title="Records and converts a test clip without moving the motor">Test clip (no feed)</button>
         </div>
     </form>
-    <p class="hint" style="margin-top:8px;">4 quarter-turns = 1 full rotation.</p>
+    <p class="hint" style="margin-top:8px;">4 quarter-turns = 1 full rotation. "Test clip" checks the camera &amp; GIF pipeline without dispensing food.</p>
+
+    {% if dryrun_status == 'ok' %}
+    <div class="banner ok">✅ Dry run succeeded — camera &amp; clip pipeline is working. The motor did <strong>not</strong> move.</div>
+    {% elif dryrun_status == 'err' %}
+    <div class="banner err">❌ Dry run failed — no clip was produced. Check the service log for the reason (<code>journalctl -u fishfeeder.service</code>).</div>
+    {% endif %}
+
+    {% if dryrun_available %}
+    <div class="dryrun-preview">
+        <p class="hint">Latest test clip:</p>
+        <img class="dryrun-gif" src="{{ url_for('get_photo', filename=dryrun_file) }}?v={{ dryrun_mtime }}" alt="Latest dry-run clip">
+    </div>
+    {% endif %}
 
     <div class="card">
         <h3 class="card-title">Feeding Schedule</h3>
