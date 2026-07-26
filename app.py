@@ -39,6 +39,7 @@ VIDEO_HEIGHT = 480
 VIDEO_FPS = 15             # capture frame rate
 GIF_FPS = 12               # GIF frame rate — smooth enough to read in the browser
 GIF_WIDTH = 400            # GIF is scaled to this width (height auto) to stay light
+CONVERT_TIMEOUT = 240      # max seconds for the ffmpeg GIF conversion (Pi Zero is slow)
 
 def motor_off():
     """Cut power to every motor coil. Safe to call anytime; never raises."""
@@ -262,26 +263,49 @@ def record_feed_gif(quarters, gif_path):
         pass
     _stop_recorder(proc)
 
+    # Convert into a TEMP file first, then rename into place only if ffmpeg
+    # actually succeeded. This guarantees a broken/partial GIF (e.g. ffmpeg
+    # killed by the timeout) never gets published under the real filename.
+    gif_tmp = gif_path + ".part"
     convert_cmd = [
         "ffmpeg", "-y",
         "-r", str(VIDEO_FPS),
         "-i", h264_path,
         "-vf", (f"fps={GIF_FPS},scale={GIF_WIDTH}:-1:flags=lanczos,"
                 "split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse"),
-        gif_path,
+        "-f", "gif",
+        gif_tmp,
     ]
+    ok = False
     try:
-        subprocess.run(convert_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120)
+        result = subprocess.run(convert_cmd, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.PIPE, timeout=CONVERT_TIMEOUT)
+        if result.returncode == 0 and os.path.exists(gif_tmp) and os.path.getsize(gif_tmp) > 0:
+            os.replace(gif_tmp, gif_path)  # atomic publish of a complete file
+            ok = True
+        else:
+            tail = (result.stderr or b"").decode("utf-8", "replace").strip().splitlines()[-3:]
+            print(f"GIF conversion failed (rc={result.returncode}): {' | '.join(tail)}")
+    except subprocess.TimeoutExpired:
+        print(f"GIF conversion timed out after {CONVERT_TIMEOUT}s — clip too long/Pi too busy.")
     except Exception as e:
         print(f"GIF conversion error: {e}")
     finally:
-        try:
-            if os.path.exists(h264_path):
-                os.remove(h264_path)
-        except OSError as e:
-            print(f"Could not remove temp clip: {e}")
+        # Never leave temp artifacts behind, and never leave a partial GIF at
+        # the real path (e.g. from an earlier failed attempt).
+        for path in (h264_path, gif_tmp):
+            try:
+                if os.path.exists(path):
+                    os.remove(path)
+            except OSError as e:
+                print(f"Could not remove {path}: {e}")
+        if not ok and os.path.exists(gif_path):
+            try:
+                os.remove(gif_path)
+            except OSError as e:
+                print(f"Could not remove broken GIF: {e}")
 
-    return os.path.exists(gif_path)
+    return ok
 
 # --- CORE FEED ACTION (shared by manual button and scheduler) ---
 def perform_feed(quarters=4):
