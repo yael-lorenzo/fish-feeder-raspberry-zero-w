@@ -9,13 +9,21 @@
         .container { max-width: 700px; margin: 0 auto; background: white; padding: 20px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.05); }
         h1 { margin-bottom: 5px; color: #1e293b; }
         .clock { font-size: 1.2rem; color: #64748b; font-variant-numeric: tabular-nums; margin-bottom: 20px; }
-        .stream-box { width: 100%; border-radius: 8px; overflow: hidden; background: #000; margin-bottom: 25px; box-shadow: inset 0 0 10px rgba(0,0,0,0.5); position: relative; padding-top: 75%; }
-        .stream-box img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
-        .btn-feed { background: #2563eb; color: white; border: none; padding: 15px 40px; font-size: 1.3rem; font-weight: bold; border-radius: 50px; cursor: pointer; transition: all 0.2s ease; box-shadow: 0 4px 6px rgba(37,99,235,0.2); width: 80%; max-width: 300px; }
+
+        /* --- Tabs / mobile menu --- */
+        .tabnav { margin-bottom: 22px; }
+        .menu-toggle { display: none; }
+        .tabbar { display: flex; gap: 4px; flex-wrap: wrap; justify-content: center; border-bottom: 2px solid #e2e8f0; }
+        .tab-btn { background: none; border: none; padding: 12px 16px; font-size: 1rem; color: #64748b; cursor: pointer; border-bottom: 3px solid transparent; margin-bottom: -2px; font-weight: 500; }
+        .tab-btn:hover { color: #1e293b; }
+        .tab-btn.active { color: #2563eb; border-bottom-color: #2563eb; }
+        .tab-panel { display: none; text-align: left; }
+        .tab-panel.active { display: block; }
+
+        .btn-feed { background: #2563eb; color: white; border: none; padding: 15px 40px; font-size: 1.3rem; font-weight: bold; border-radius: 50px; cursor: pointer; transition: all 0.2s ease; box-shadow: 0 4px 6px rgba(37,99,235,0.2); }
         .btn-feed:hover { background: #1d4ed8; transform: translateY(-1px); }
         .btn-feed:active { transform: translateY(1px); }
-        .log-section { margin-top: 40px; text-align: left; }
-        .log-title { border-bottom: 2px solid #e2e8f0; padding-bottom: 8px; font-size: 1.4rem; color: #1e293b; }
+        .section-title { border-bottom: 2px solid #e2e8f0; padding-bottom: 8px; font-size: 1.4rem; color: #1e293b; margin-top: 0; }
         .log-item { display: flex; align-items: center; justify-content: space-between; padding: 12px; border-bottom: 1px solid #f1f5f9; background: #fff; transition: background 0.15s; }
         .log-item:hover { background: #f8fafc; }
         .log-time { font-size: 1rem; color: #334155; font-weight: 500; }
@@ -24,8 +32,8 @@
         .feed-controls { display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap; }
         .amount-field { display: flex; flex-direction: column; align-items: flex-start; font-size: 0.85rem; color: #64748b; }
         .amount-field input { width: 70px; padding: 8px; font-size: 1rem; border: 1px solid #cbd5e1; border-radius: 8px; margin-top: 4px; }
-        .card { margin-top: 40px; text-align: left; }
-        .card-title { border-bottom: 2px solid #e2e8f0; padding-bottom: 8px; font-size: 1.4rem; color: #1e293b; }
+        .feed-now { margin-top: 30px; padding-top: 24px; border-top: 2px dashed #e2e8f0; text-align: center; }
+
         .schedule-add { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin: 18px 0; }
         .schedule-add label { display: flex; flex-direction: column; font-size: 0.85rem; color: #64748b; }
         .schedule-add input { padding: 8px; font-size: 1rem; border: 1px solid #cbd5e1; border-radius: 8px; margin-top: 4px; }
@@ -46,13 +54,40 @@
         .page-link { text-decoration: none; background: #eff6ff; color: #2563eb; padding: 8px 16px; border-radius: 8px; font-size: 0.95rem; font-weight: 500; }
         .page-link:hover { background: #dbeafe; }
         .page-link.disabled { background: #f1f5f9; color: #cbd5e1; cursor: default; }
+
         .btn-dryrun { background: #f1f5f9; color: #475569; border: 1px solid #cbd5e1; padding: 12px 20px; font-size: 1rem; font-weight: 600; border-radius: 50px; cursor: pointer; }
         .btn-dryrun:hover { background: #e2e8f0; }
-        .banner { margin: 14px auto 0; padding: 12px 16px; border-radius: 10px; font-size: 0.95rem; max-width: 420px; }
+        .banner { margin: 14px auto 0; padding: 12px 16px; border-radius: 10px; font-size: 0.95rem; max-width: 460px; }
         .banner.ok { background: #dcfce7; color: #166534; border: 1px solid #86efac; }
         .banner.err { background: #fee2e2; color: #991b1b; border: 1px solid #fca5a5; }
-        .dryrun-preview { margin-top: 14px; }
+        .dryrun-preview { margin-top: 14px; text-align: center; }
         .dryrun-gif { max-width: 100%; border-radius: 8px; border: 2px dashed #cbd5e1; }
+
+        /* --- Live view --- */
+        .stream-box { width: 100%; border-radius: 8px; overflow: hidden; background: #000; margin-bottom: 16px; box-shadow: inset 0 0 10px rgba(0,0,0,0.5); position: relative; padding-top: 75%; }
+        .stream-box img { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
+        .stream-placeholder { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; color: #94a3b8; font-size: 1rem; }
+        .stream-status { text-align: center; color: #64748b; font-size: 0.9rem; margin-bottom: 12px; }
+        .stream-controls { display: flex; gap: 10px; justify-content: center; }
+        .btn-stream { padding: 10px 22px; border-radius: 8px; border: none; font-weight: 600; cursor: pointer; font-size: 1rem; }
+        .btn-start { background: #16a34a; color: #fff; }
+        .btn-start:hover { background: #15803d; }
+        .btn-stop { background: #ef4444; color: #fff; }
+        .btn-stop:hover { background: #dc2626; }
+
+        /* --- Service logs --- */
+        .toolbar { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 12px; flex-wrap: wrap; }
+        .btn-refresh { background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 0.95rem; font-weight: 500; }
+        .btn-refresh:hover { background: #dbeafe; }
+        .syslog-pre { background: #0b1020; color: #cbd5e1; text-align: left; padding: 14px; border-radius: 10px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.78rem; line-height: 1.45; max-height: 60vh; overflow: auto; white-space: pre-wrap; word-break: break-word; margin: 0; }
+
+        @media (max-width: 640px) {
+            .menu-toggle { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; background: #2563eb; color: #fff; border: none; padding: 13px 18px; border-radius: 10px; font-size: 1.05rem; font-weight: 600; cursor: pointer; }
+            .tabbar { display: none; flex-direction: column; border: 1px solid #e2e8f0; border-radius: 10px; margin-top: 8px; overflow: hidden; border-bottom: 1px solid #e2e8f0; }
+            .tabbar.open { display: flex; }
+            .tab-btn { border-bottom: 1px solid #f1f5f9; margin: 0; text-align: center; }
+            .tab-btn.active { border-bottom-color: #f1f5f9; background: #eff6ff; }
+        }
     </style>
 </head>
 <body>
@@ -61,38 +96,67 @@
     <h1>🐟 Automated Fish Feeder</h1>
     <div class="clock" id="live-clock">Loading Device Time...</div>
 
-    <div class="stream-box">
-        <img src="{{ url_for('video_feed') }}" alt="Live Camera Feed Syncing...">
-    </div>
-
-    <form action="{{ url_for('feed') }}" method="POST">
-        <div class="feed-controls">
-            <label class="amount-field">Quarter-turns
-                <input type="number" name="quarters" value="4" min="1" step="1">
-            </label>
-            <button type="submit" class="btn-feed" onclick="this.innerText='Serving Food...';">FEED NOW</button>
-            <button type="submit" class="btn-dryrun" formaction="{{ url_for('dryrun') }}"
-                    onclick="this.innerText='Recording test…';"
-                    title="Records and converts a test clip without moving the motor">Test clip (no feed)</button>
+    <nav class="tabnav">
+        <button class="menu-toggle" id="menu-toggle" onclick="document.getElementById('tabbar').classList.toggle('open')">
+            <span id="menu-label">Feeding Log</span> ▾
+        </button>
+        <div class="tabbar" id="tabbar">
+            <button class="tab-btn" data-tab="log" onclick="showTab('log')">Feeding Log</button>
+            <button class="tab-btn" data-tab="config" onclick="showTab('config')">Config</button>
+            <button class="tab-btn" data-tab="live" onclick="showTab('live')">Live View</button>
+            <button class="tab-btn" data-tab="test" onclick="showTab('test')">Test Clip</button>
+            <button class="tab-btn" data-tab="syslog" onclick="showTab('syslog')">Logs (3 days)</button>
         </div>
-    </form>
-    <p class="hint" style="margin-top:8px;">4 quarter-turns = 1 full rotation. "Test clip" checks the camera &amp; GIF pipeline without dispensing food.</p>
+    </nav>
 
-    {% if dryrun_status == 'ok' %}
-    <div class="banner ok">✅ Dry run succeeded — camera &amp; clip pipeline is working. The motor did <strong>not</strong> move.</div>
-    {% elif dryrun_status == 'err' %}
-    <div class="banner err">❌ Dry run failed — no clip was produced. Check the service log for the reason (<code>journalctl -u fishfeeder.service</code>).</div>
-    {% endif %}
+    <!-- ============ TAB: FEEDING LOG (+ Feed Now) ============ -->
+    <section class="tab-panel" id="tab-log">
+        <h3 class="section-title">Feeding Log — {{ viewed_day }}{% if is_today %} (Today){% endif %}</h3>
+        {% if not logs %}
+            <p style="color:#94a3b8; text-align:center; padding: 20px;">No feedings recorded on this day.</p>
+        {% endif %}
+        {% for log in logs %}
+        <div class="log-item">
+            <span class="log-time">✅ Served at: <strong>{{ log.time }}</strong></span>
+            {% if log.image %}
+            <a href="{{ url_for('get_photo', filename=log.image) }}" target="_blank">
+                <img class="thumbnail" src="{{ url_for('get_photo', filename=log.image) }}" title="Click to view the full clip" loading="lazy">
+            </a>
+            {% else %}
+            <span class="hint">no clip</span>
+            {% endif %}
+        </div>
+        {% endfor %}
 
-    {% if dryrun_available %}
-    <div class="dryrun-preview">
-        <p class="hint">Latest test clip:</p>
-        <img class="dryrun-gif" src="{{ url_for('get_photo', filename=dryrun_file) }}?v={{ dryrun_mtime }}" alt="Latest dry-run clip">
-    </div>
-    {% endif %}
+        <div class="pagination">
+            {% if prev_day %}
+                <a class="page-link" href="{{ url_for('index', day=prev_day) }}#log">← {{ prev_day }}</a>
+            {% else %}
+                <span class="page-link disabled">← Older</span>
+            {% endif %}
+            {% if next_day %}
+                <a class="page-link" href="{{ url_for('index', day=next_day) }}#log">{{ next_day }} →</a>
+            {% else %}
+                <span class="page-link disabled">Newer →</span>
+            {% endif %}
+        </div>
 
-    <div class="card">
-        <h3 class="card-title">Feeding Schedule</h3>
+        <div class="feed-now">
+            <form action="{{ url_for('feed') }}" method="POST">
+                <div class="feed-controls">
+                    <label class="amount-field">Quarter-turns
+                        <input type="number" name="quarters" value="4" min="1" step="1">
+                    </label>
+                    <button type="submit" class="btn-feed" onclick="this.innerText='Serving Food...';">FEED NOW</button>
+                </div>
+            </form>
+            <p class="hint" style="margin-top:8px;">4 quarter-turns = 1 full rotation.</p>
+        </div>
+    </section>
+
+    <!-- ============ TAB: CONFIG (Schedule) ============ -->
+    <section class="tab-panel" id="tab-config">
+        <h3 class="section-title">Feeding Schedule</h3>
         <form action="{{ url_for('schedule_add') }}" method="POST" class="schedule-add">
             <label>Time (daily)
                 <input type="time" name="time" required>
@@ -127,49 +191,112 @@
             </span>
         </div>
         {% endfor %}
-    </div>
+    </section>
 
-    <div class="log-section">
-        <h3 class="log-title">Feeding Log — {{ viewed_day }}{% if is_today %} (Today){% endif %}</h3>
-        {% if not logs %}
-            <p style="color:#94a3b8; text-align:center; padding: 20px;">No feedings recorded on this day.</p>
+    <!-- ============ TAB: LIVE VIEW ============ -->
+    <section class="tab-panel" id="tab-live">
+        <h3 class="section-title">Live Camera</h3>
+        <div class="stream-box">
+            <img id="stream" alt="">
+            <div class="stream-placeholder" id="stream-ph">Stream stopped</div>
+        </div>
+        <div class="stream-status" id="stream-status">Stopped</div>
+        <div class="stream-controls">
+            <button class="btn-stream btn-start" onclick="startStream()">▶ Start</button>
+            <button class="btn-stream btn-stop" onclick="stopStream()">■ Stop</button>
+        </div>
+    </section>
+
+    <!-- ============ TAB: TEST CLIP (dry run) ============ -->
+    <section class="tab-panel" id="tab-test">
+        <h3 class="section-title">Test Clip (no feed)</h3>
+        <p class="hint" style="margin-bottom:16px;">Records &amp; converts a clip exactly like a real feed, but the motor never moves — use it to check the camera &amp; GIF pipeline.</p>
+        <form action="{{ url_for('dryrun') }}" method="POST" style="text-align:center;">
+            <div class="feed-controls">
+                <label class="amount-field">Quarter-turns
+                    <input type="number" name="quarters" value="4" min="1" step="1">
+                </label>
+                <button type="submit" class="btn-dryrun" onclick="this.innerText='Recording test…';">Run test clip</button>
+            </div>
+        </form>
+
+        {% if dryrun_status == 'ok' %}
+        <div class="banner ok">✅ Dry run succeeded — camera &amp; clip pipeline is working. The motor did <strong>not</strong> move.</div>
+        {% elif dryrun_status == 'err' %}
+        <div class="banner err">❌ Dry run failed — no clip was produced. See the <strong>Logs (3 days)</strong> tab for the reason.</div>
         {% endif %}
-        {% for log in logs %}
-        <div class="log-item">
-            <span class="log-time">✅ Served at: <strong>{{ log.time }}</strong></span>
-            {% if log.image %}
-            <a href="{{ url_for('get_photo', filename=log.image) }}" target="_blank">
-                <img class="thumbnail" src="{{ url_for('get_photo', filename=log.image) }}" title="Click to view the full clip" loading="lazy">
-            </a>
-            {% else %}
-            <span class="hint">no clip</span>
-            {% endif %}
-        </div>
-        {% endfor %}
 
-        <div class="pagination">
-            {% if prev_day %}
-                <a class="page-link" href="{{ url_for('index', day=prev_day) }}">← {{ prev_day }}</a>
-            {% else %}
-                <span class="page-link disabled">← Older</span>
-            {% endif %}
-            {% if next_day %}
-                <a class="page-link" href="{{ url_for('index', day=next_day) }}">{{ next_day }} →</a>
-            {% else %}
-                <span class="page-link disabled">Newer →</span>
-            {% endif %}
+        {% if dryrun_available %}
+        <div class="dryrun-preview">
+            <p class="hint">Latest test clip:</p>
+            <img class="dryrun-gif" src="{{ url_for('get_photo', filename=dryrun_file) }}?v={{ dryrun_mtime }}" alt="Latest dry-run clip">
         </div>
-    </div>
+        {% endif %}
+    </section>
+
+    <!-- ============ TAB: SERVICE LOGS (last 3 days) ============ -->
+    <section class="tab-panel" id="tab-syslog">
+        <div class="toolbar">
+            <h3 class="section-title" style="border:none; margin:0;">Service Logs (last 3 days)</h3>
+            <button class="btn-refresh" onclick="loadSyslog()">↻ Refresh</button>
+        </div>
+        <pre class="syslog-pre" id="syslog-content">Loading…</pre>
+    </section>
 </div>
 
 <script>
-    // Simple JavaScript running on the client side to keep time ticking smoothly
+    // --- Live clock ---
     function updateClock() {
         const now = new Date();
         document.getElementById('live-clock').innerText = "System Time: " + now.toLocaleString();
     }
     setInterval(updateClock, 1000);
     updateClock();
+
+    // --- Live stream start/stop ---
+    const VIDEO_URL = "{{ url_for('video_feed') }}";
+    function startStream() {
+        const img = document.getElementById('stream');
+        img.src = VIDEO_URL + '?t=' + Date.now();  // fresh connection
+        document.getElementById('stream-ph').style.display = 'none';
+        document.getElementById('stream-status').innerText = '🔴 Streaming live';
+    }
+    function stopStream() {
+        const img = document.getElementById('stream');
+        img.removeAttribute('src');                // closes the MJPEG connection
+        document.getElementById('stream-ph').style.display = 'flex';
+        document.getElementById('stream-status').innerText = 'Stopped';
+    }
+
+    // --- Service logs ---
+    function loadSyslog() {
+        const pre = document.getElementById('syslog-content');
+        pre.textContent = 'Loading…';
+        fetch("{{ url_for('logs') }}")
+            .then(r => r.text())
+            .then(t => { pre.textContent = t; pre.scrollTop = pre.scrollHeight; })
+            .catch(e => { pre.textContent = 'Failed to load logs: ' + e; });
+    }
+
+    // --- Tab switching ---
+    const VALID_TABS = ['log', 'config', 'live', 'test', 'syslog'];
+    function showTab(name, collapse) {
+        if (!VALID_TABS.includes(name)) name = 'log';
+        document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'tab-' + name));
+        document.querySelectorAll('.tab-btn').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
+        const btn = document.querySelector('.tab-btn[data-tab="' + name + '"]');
+        document.getElementById('menu-label').innerText = btn ? btn.innerText : 'Menu';
+        if (collapse !== false) document.getElementById('tabbar').classList.remove('open');
+        history.replaceState(null, '', '#' + name);
+
+        // Per-tab hooks: only stream while on Live; refresh logs when opened.
+        if (name === 'live') { startStream(); } else { stopStream(); }
+        if (name === 'syslog') { loadSyslog(); }
+    }
+
+    // Restore the tab from the URL hash (set by form redirects), default to log.
+    const initial = (location.hash || '').replace('#', '');
+    showTab(VALID_TABS.includes(initial) ? initial : 'log', false);
 </script>
 
 </body>

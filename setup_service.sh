@@ -92,6 +92,10 @@ else
 fi
 
 # 4. Register and start the background engine
+# Let the service read its own journal so the in-app "Logs" tab works.
+echo -e "\nGranting journal read access to ${CURRENT_USER}..."
+sudo usermod -aG systemd-journal "$CURRENT_USER"
+
 echo -e "\nRegistering and enabling the service..."
 sudo systemctl daemon-reload
 sudo systemctl enable fishfeeder.service

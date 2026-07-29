@@ -481,13 +481,13 @@ def video_feed():
 def feed():
     quarters = clean_quarters(request.form.get('quarters'), default=4)
     perform_feed(quarters)
-    return redirect(url_for('index'))
+    return redirect(url_for('index') + '#log')
 
 @app.route('/dryrun', methods=['POST'])
 def dryrun():
     quarters = clean_quarters(request.form.get('quarters'), default=4)
     ok = perform_dry_run(quarters)
-    return redirect(url_for('index', dryrun=('ok' if ok else 'err')))
+    return redirect(url_for('index', dryrun=('ok' if ok else 'err')) + '#test')
 
 @app.route('/schedule/add', methods=['POST'])
 def schedule_add():
@@ -498,7 +498,7 @@ def schedule_add():
     try:
         datetime.strptime(entry_time, "%H:%M")
     except ValueError:
-        return redirect(url_for('index'))
+        return redirect(url_for('index') + '#config')
 
     data = load_schedule()
     data["entries"].append({
@@ -508,7 +508,7 @@ def schedule_add():
         "skip_next": False,  # one-time "skip the next occurrence" flag
     })
     save_schedule(data)
-    return redirect(url_for('index'))
+    return redirect(url_for('index') + '#config')
 
 @app.route('/schedule/delete', methods=['POST'])
 def schedule_delete():
@@ -516,7 +516,7 @@ def schedule_delete():
     data = load_schedule()
     data["entries"] = [e for e in data["entries"] if e.get("id") != entry_id]
     save_schedule(data)
-    return redirect(url_for('index'))
+    return redirect(url_for('index') + '#config')
 
 @app.route('/schedule/skip', methods=['POST'])
 def schedule_skip():
@@ -528,7 +528,28 @@ def schedule_skip():
             entry["skip_next"] = not entry.get("skip_next", False)
             break
     save_schedule(data)
-    return redirect(url_for('index'))
+    return redirect(url_for('index') + '#config')
+
+@app.route('/logs')
+def logs():
+    """Return the service journal for the last 3 days as plain text (for the Logs tab)."""
+    try:
+        result = subprocess.run(
+            ["journalctl", "-u", "fishfeeder.service", "--since", "3 days ago",
+             "--no-pager", "-n", "1500"],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=20,
+        )
+        text = result.stdout.decode("utf-8", "replace")
+        if not text.strip():
+            text = ("(No journal output. The service user may lack permission to read the "
+                    "journal — add it to the 'systemd-journal' group and restart the service.)")
+    except FileNotFoundError:
+        text = "journalctl is not available on this system."
+    except subprocess.TimeoutExpired:
+        text = "Timed out while reading the journal."
+    except Exception as e:
+        text = f"Error reading logs: {e}"
+    return Response(text, mimetype="text/plain; charset=utf-8")
 
 @app.route('/photos/<filename>')
 def get_photo(filename):

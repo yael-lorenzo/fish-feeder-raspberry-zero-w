@@ -1,0 +1,8 @@
+.git
+.venv
+__pycache__
+*.pyc
+photos/*.gif
+photos/*.h264
+photos/*.part
+dryrun_latest*

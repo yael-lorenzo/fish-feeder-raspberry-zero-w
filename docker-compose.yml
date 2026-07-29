@@ -1,0 +1,17 @@
+# Local development for the Fish Feeder web UI (no Raspberry Pi hardware needed).
+#
+#   docker compose up --build
+#   open http://localhost:8000
+#
+# Edits to app.py / templates auto-reload thanks to the bind mount + Flask debug.
+services:
+  fishfeeder-dev:
+    build: .
+    container_name: fishfeeder-dev
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app            # live-edit: your changes are reflected immediately
+    environment:
+      - DEV_HOST=0.0.0.0  # reachable from the host via the port mapping
+      - DEV_PORT=8000
