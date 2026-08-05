@@ -20,6 +20,9 @@ step_sequence = [
 
 # Traffic light for the camera: True means streaming, False means paused for a photo
 camera_streaming_allowed = True
+# True only while the stream loop is actively grabbing a frame (holding the camera).
+# The feed path waits for this to clear before opening the camera for recording.
+stream_in_capture = False
 
 # --- SCHEDULE / FEED CONFIG ---
 SCHEDULE_FILE = "schedule.json"
@@ -41,6 +44,10 @@ GIF_FPS = 10               # GIF frame rate — smooth enough to read in the bro
 GIF_WIDTH = 400            # GIF is scaled to this width (height auto) to stay light
 CONVERT_TIMEOUT = 240      # max seconds for the ffmpeg GIF conversion (Pi Zero is slow)
 DRYRUN_FILE = "dryrun_latest.gif"  # single reusable test clip, overwritten each dry run
+# After pausing the live stream, wait (up to this many seconds) for any in-flight
+# capture to release the camera before rpicam-vid opens it. This is a hard upper
+# bound; the wait normally ends as soon as the stream confirms it's idle.
+STREAM_RELEASE_TIMEOUT = 4.0
 
 def motor_off():
     """Cut power to every motor coil. Safe to call anytime; never raises."""
@@ -96,19 +103,38 @@ def capture_single_frame():
         return None
 
 def generate_stream_frames():
-    global camera_streaming_allowed  # Tell Python to look at the global traffic light variable
+    global stream_in_capture
     while True:
-        # If the feed button was pressed, pause and yield the camera
+        # If a feed is in progress, pause and release the camera.
         if not camera_streaming_allowed:
+            stream_in_capture = False
             time.sleep(0.1)  # Sleep briefly and check again
             continue
 
-        frame = capture_single_frame()
+        # Mark the camera as held for exactly the duration of the capture, so the
+        # feed path can wait for it to clear before opening the camera itself.
+        stream_in_capture = True
+        try:
+            frame = capture_single_frame()
+        finally:
+            stream_in_capture = False
+
         if frame:
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
 
         time.sleep(1.0) # Refresh rate: exactly 1 photo per second
+
+def wait_for_camera_release(timeout=STREAM_RELEASE_TIMEOUT):
+    """
+    After pausing the stream (camera_streaming_allowed = False), block until the
+    stream loop is no longer mid-capture, so the camera is actually free before
+    rpicam-vid opens it. Returns almost immediately when nothing is streaming.
+    """
+    deadline = time.monotonic() + timeout
+    while stream_in_capture and time.monotonic() < deadline:
+        time.sleep(0.05)
+    time.sleep(0.2)  # small settle so the device is fully released
 
 # --- SCHEDULE STORAGE (JSON, no DB needed) ---
 def load_schedule():
@@ -199,6 +225,14 @@ def prune_old_history():
           f"older than {RETENTION_DAYS} days.")
 
 # --- FEED CLIP RECORDING ---
+def _safe_remove(path):
+    """Delete a file if it exists; never raises."""
+    try:
+        if path and os.path.exists(path):
+            os.remove(path)
+    except OSError as e:
+        print(f"Could not remove {path}: {e}")
+
 def _stop_recorder(proc):
     """Best-effort clean stop of the rpicam-vid process. Never raises."""
     if proc is None:
@@ -226,6 +260,7 @@ def record_feed_gif(quarters, gif_path, spin=True):
     """
     rotations = quarters * QUARTER_ROTATION
     h264_path = gif_path[:-4] + ".h264"  # gif_path ends in ".gif"
+    rec_err_path = h264_path + ".log"    # rpicam-vid stderr, so failures are visible
 
     record_cmd = [
         "rpicam-vid", "-t", "0",
@@ -239,9 +274,11 @@ def record_feed_gif(quarters, gif_path, spin=True):
 
     # 1. Best-effort: start filming before the food drops. A failure here
     #    (camera busy, no disk space for the clip) must not stop the feed.
+    #    rpicam-vid's stderr goes to a file so we can report WHY it failed.
     proc = None
     try:
-        proc = subprocess.Popen(record_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        rec_err = open(rec_err_path, "wb")
+        proc = subprocess.Popen(record_cmd, stdout=subprocess.DEVNULL, stderr=rec_err)
         time.sleep(PRE_ROLL_SECONDS)
     except Exception as e:
         print(f"Feed recording failed to start (feeding anyway): {e}")
@@ -264,12 +301,32 @@ def record_feed_gif(quarters, gif_path, spin=True):
 
     # 3. Best-effort: finish the clip and convert it to a GIF.
     if proc is None:
+        _safe_remove(rec_err_path)
         return False
     try:
         time.sleep(POST_ROLL_SECONDS)  # keep filming after the motor stops
     except Exception:
         pass
     _stop_recorder(proc)
+    try:
+        rec_err.close()
+    except Exception:
+        pass
+
+    # Verify rpicam-vid actually produced a usable clip. If not, surface its
+    # stderr (camera busy, timeout, etc.) instead of failing on a missing file.
+    if not (os.path.exists(h264_path) and os.path.getsize(h264_path) > 0):
+        reason = ""
+        try:
+            with open(rec_err_path, "r", errors="replace") as f:
+                lines = [ln.strip() for ln in f if ln.strip()]
+                reason = " | ".join(lines[-4:])
+        except OSError:
+            pass
+        print(f"Recording produced no video (rpicam-vid rc={proc.returncode}). {reason}")
+        _safe_remove(h264_path)
+        _safe_remove(rec_err_path)
+        return False
 
     # Convert to GIF with a TWO-PASS palette. Pass 1 writes a 256-color palette
     # to a temp PNG; pass 2 applies it. Each pass STREAMS the video once with a
@@ -308,15 +365,12 @@ def record_feed_gif(quarters, gif_path, spin=True):
     finally:
         # Never leave temp artifacts behind, and never leave a partial GIF at
         # the real path (e.g. from an earlier failed attempt).
-        for path in (h264_path, gif_tmp, palette):
+        for path in (h264_path, gif_tmp, palette, rec_err_path):
+            _safe_remove(path)
+        if not ok:
             try:
-                if os.path.exists(path):
-                    os.remove(path)
-            except OSError as e:
-                print(f"Could not remove {path}: {e}")
-        if not ok and os.path.exists(gif_path):
-            try:
-                os.remove(gif_path)
+                if os.path.exists(gif_path):
+                    os.remove(gif_path)
             except OSError as e:
                 print(f"Could not remove broken GIF: {e}")
 
@@ -336,7 +390,7 @@ def perform_feed(quarters=4):
     with feed_lock:
         # Block the stream loop from touching the hardware, and give it time to let go.
         camera_streaming_allowed = False
-        time.sleep(0.3)
+        wait_for_camera_release()  # block until the stream actually frees the camera
         print(f"\n--- FEEDING: {quarters} quarter-turn(s) = {quarters * QUARTER_ROTATION} rotation(s) ---")
         filename = f"feed_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.gif"
         filepath = os.path.join("photos", filename)
@@ -374,7 +428,7 @@ def perform_dry_run(quarters=4):
 
     with feed_lock:
         camera_streaming_allowed = False
-        time.sleep(0.3)
+        wait_for_camera_release()  # block until the stream actually frees the camera
         print(f"\n--- DRY RUN: recording test clip (motor OFF) ---")
         try:
             filepath = os.path.join("photos", DRYRUN_FILE)
