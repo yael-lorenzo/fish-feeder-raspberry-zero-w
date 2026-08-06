@@ -18,11 +18,15 @@ step_sequence = [
     [0,0,1,0], [0,0,1,1], [0,0,0,1], [1,0,0,1]
 ]
 
-# Traffic light for the camera: True means streaming, False means paused for a photo
+# Only ONE rpicam process may touch the camera at a time. EVERY camera operation
+# (live-stream still captures AND feed recording) must hold this lock, so the app
+# can never launch two overlapping processes that fight over the device.
+camera_lock = threading.Lock()
+# Soft signal: set False during a feed so the stream stops trying to capture.
 camera_streaming_allowed = True
-# True only while the stream loop is actively grabbing a frame (holding the camera).
-# The feed path waits for this to clear before opening the camera for recording.
-stream_in_capture = False
+# Bumped each time a new /video_feed connection starts. Older generator loops see
+# the change and exit, so stale stream threads can't pile up on the camera.
+stream_generation = 0
 
 # --- SCHEDULE / FEED CONFIG ---
 SCHEDULE_FILE = "schedule.json"
@@ -44,10 +48,12 @@ GIF_FPS = 10               # GIF frame rate — smooth enough to read in the bro
 GIF_WIDTH = 400            # GIF is scaled to this width (height auto) to stay light
 CONVERT_TIMEOUT = 240      # max seconds for the ffmpeg GIF conversion (Pi Zero is slow)
 DRYRUN_FILE = "dryrun_latest.gif"  # single reusable test clip, overwritten each dry run
-# After pausing the live stream, wait (up to this many seconds) for any in-flight
-# capture to release the camera before rpicam-vid opens it. This is a hard upper
-# bound; the wait normally ends as soon as the stream confirms it's idle.
-STREAM_RELEASE_TIMEOUT = 4.0
+# Max seconds a feed waits to acquire the camera before giving up and feeding
+# WITHOUT recording (the motor spin is never sacrificed for a clip).
+CAMERA_LOCK_TIMEOUT = 7.0
+# Stop the live-stream loop after this many consecutive capture failures, instead
+# of hammering a stuck camera forever. The user can press Start to retry.
+STREAM_MAX_FAILURES = 5
 
 def motor_off():
     """Cut power to every motor coil. Safe to call anytime; never raises."""
@@ -94,47 +100,43 @@ def capture_single_frame():
         "-o", "-"                   # Pipe output directly to stdout (RAM)
     ]
     try:
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=3)
-        #camera_streaming_allowed = True
+        with camera_lock:  # never overlap with a feed recording or another capture
+            result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=5)
         return result.stdout
     except Exception as e:
         print(f"Camera capture error: {e}")
-        #camera_streaming_allowed = True
         return None
 
 def generate_stream_frames():
-    global stream_in_capture
+    global stream_generation
+    # Claim the newest generation; any older stream loop will see the change and exit.
+    stream_generation += 1
+    my_gen = stream_generation
+    failures = 0
     while True:
-        # If a feed is in progress, pause and release the camera.
+        # A newer viewer connected — let this stale loop die so threads don't pile up.
+        if my_gen != stream_generation:
+            return
+
+        # A feed is running (it holds the camera); pause without touching it.
         if not camera_streaming_allowed:
-            stream_in_capture = False
-            time.sleep(0.1)  # Sleep briefly and check again
+            time.sleep(0.1)
             continue
 
-        # Mark the camera as held for exactly the duration of the capture, so the
-        # feed path can wait for it to clear before opening the camera itself.
-        stream_in_capture = True
-        try:
-            frame = capture_single_frame()
-        finally:
-            stream_in_capture = False
-
+        frame = capture_single_frame()  # serialized by camera_lock
         if frame:
+            failures = 0
             yield (b'--frame\r\n'
                    b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-
-        time.sleep(1.0) # Refresh rate: exactly 1 photo per second
-
-def wait_for_camera_release(timeout=STREAM_RELEASE_TIMEOUT):
-    """
-    After pausing the stream (camera_streaming_allowed = False), block until the
-    stream loop is no longer mid-capture, so the camera is actually free before
-    rpicam-vid opens it. Returns almost immediately when nothing is streaming.
-    """
-    deadline = time.monotonic() + timeout
-    while stream_in_capture and time.monotonic() < deadline:
-        time.sleep(0.05)
-    time.sleep(0.2)  # small settle so the device is fully released
+            time.sleep(1.0)  # Refresh rate: ~1 photo per second
+        else:
+            # Camera failing — back off, and give up rather than hammer a stuck
+            # device forever. Pressing Start on the Live tab restarts the loop.
+            failures += 1
+            if failures >= STREAM_MAX_FAILURES:
+                print(f"Live stream stopping after {failures} consecutive camera failures.")
+                return
+            time.sleep(2.0)
 
 # --- SCHEDULE STORAGE (JSON, no DB needed) ---
 def load_schedule():
@@ -272,46 +274,60 @@ def record_feed_gif(quarters, gif_path, spin=True):
         "-o", h264_path,
     ]
 
-    # 1. Best-effort: start filming before the food drops. A failure here
-    #    (camera busy, no disk space for the clip) must not stop the feed.
-    #    rpicam-vid's stderr goes to a file so we can report WHY it failed.
+    # Acquire EXCLUSIVE camera access for the whole recording. If it can't be had
+    # in time (a stuck/busy camera), we STILL feed — the motor never waits on a clip.
     proc = None
+    rec_err = None
+    got_camera = camera_lock.acquire(timeout=CAMERA_LOCK_TIMEOUT)
     try:
-        rec_err = open(rec_err_path, "wb")
-        proc = subprocess.Popen(record_cmd, stdout=subprocess.DEVNULL, stderr=rec_err)
-        time.sleep(PRE_ROLL_SECONDS)
-    except Exception as e:
-        print(f"Feed recording failed to start (feeding anyway): {e}")
-        _stop_recorder(proc)
-        proc = None
-
-    # 2. CRITICAL: spin the motor no matter what happened above.
-    #    Dry run: skip the spin but hold for the same estimated time so the
-    #    clip length (and thus conversion cost) mirrors a real feed.
-    try:
-        if spin:
-            spin_feeder_motor(rotations=rotations)
+        if got_camera:
+            # 1. Start filming before the food drops. rpicam-vid's stderr goes to
+            #    a file so we can report WHY it failed.
+            try:
+                rec_err = open(rec_err_path, "wb")
+                proc = subprocess.Popen(record_cmd, stdout=subprocess.DEVNULL, stderr=rec_err)
+                time.sleep(PRE_ROLL_SECONDS)
+            except Exception as e:
+                print(f"Feed recording failed to start (feeding anyway): {e}")
+                _stop_recorder(proc)
+                proc = None
         else:
-            est_spin = 684 * rotations * len(step_sequence) * 0.001
-            print(f"DRY RUN: holding ~{est_spin:.1f}s, motor NOT moving.")
-            time.sleep(est_spin)
-    except Exception as e:
-        print(f"Motor error during feed: {e}")
-        motor_off()  # never leave the coils energized
+            print("Camera busy — feeding WITHOUT a clip (motor still runs).")
 
-    # 3. Best-effort: finish the clip and convert it to a GIF.
+        # 2. CRITICAL: spin the motor no matter what happened above.
+        #    Dry run: skip the spin but hold for the same estimated time so the
+        #    clip length (and thus conversion cost) mirrors a real feed.
+        try:
+            if spin:
+                spin_feeder_motor(rotations=rotations)
+            else:
+                est_spin = 684 * rotations * len(step_sequence) * 0.001
+                print(f"DRY RUN: holding ~{est_spin:.1f}s, motor NOT moving.")
+                time.sleep(est_spin)
+        except Exception as e:
+            print(f"Motor error during feed: {e}")
+            motor_off()  # never leave the coils energized
+
+        # 3. Finish the clip while still holding the camera.
+        if proc is not None:
+            try:
+                time.sleep(POST_ROLL_SECONDS)  # keep filming after the motor stops
+            except Exception:
+                pass
+            _stop_recorder(proc)
+    finally:
+        try:
+            if rec_err:
+                rec_err.close()
+        except Exception:
+            pass
+        if got_camera:
+            camera_lock.release()  # release BEFORE the slow ffmpeg conversion
+
+    # Nothing recorded (camera busy, or recorder failed to start) → no GIF.
     if proc is None:
         _safe_remove(rec_err_path)
         return False
-    try:
-        time.sleep(POST_ROLL_SECONDS)  # keep filming after the motor stops
-    except Exception:
-        pass
-    _stop_recorder(proc)
-    try:
-        rec_err.close()
-    except Exception:
-        pass
 
     # Verify rpicam-vid actually produced a usable clip. If not, surface its
     # stderr (camera busy, timeout, etc.) instead of failing on a missing file.
@@ -389,8 +405,7 @@ def perform_feed(quarters=4):
 
     with feed_lock:
         # Block the stream loop from touching the hardware, and give it time to let go.
-        camera_streaming_allowed = False
-        wait_for_camera_release()  # block until the stream actually frees the camera
+        camera_streaming_allowed = False  # tell the stream to pause; camera_lock enforces exclusivity
         print(f"\n--- FEEDING: {quarters} quarter-turn(s) = {quarters * QUARTER_ROTATION} rotation(s) ---")
         filename = f"feed_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.gif"
         filepath = os.path.join("photos", filename)
@@ -427,8 +442,7 @@ def perform_dry_run(quarters=4):
     quarters = clean_quarters(quarters)
 
     with feed_lock:
-        camera_streaming_allowed = False
-        wait_for_camera_release()  # block until the stream actually frees the camera
+        camera_streaming_allowed = False  # tell the stream to pause; camera_lock enforces exclusivity
         print(f"\n--- DRY RUN: recording test clip (motor OFF) ---")
         try:
             filepath = os.path.join("photos", DRYRUN_FILE)
